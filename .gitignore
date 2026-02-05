@@ -1,3 +1,9 @@
+# ⚠️ CRITICAL: Never commit these files!
+.env
+**/.env
+*.env
+!.env.template
+
 # Credentials and Secrets
 .env
 *.env
