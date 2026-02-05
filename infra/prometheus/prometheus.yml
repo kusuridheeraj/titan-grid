@@ -1,0 +1,32 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # Prometheus itself
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Aegis metrics (Spring Boot Actuator)
+  - job_name: 'aegis'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['host.docker.internal:8080']
+
+  # Cryptex metrics (Spring Boot Actuator)
+  - job_name: 'cryptex'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['host.docker.internal:8081']
+
+  # Nexus metrics (FastAPI)
+  - job_name: 'nexus'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['host.docker.internal:8082']
+
+  # Redis metrics (via Redis Exporter - optional)
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['titan-redis:6379']

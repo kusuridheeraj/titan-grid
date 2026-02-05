@@ -1,0 +1,41 @@
+# Credentials and Secrets
+.env
+*.env
+
+# IDE Files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Java/Maven
+aegis/target/
+cryptex/target/
+*.class
+*.jar
+*.war
+!gradle-wrapper.jar
+
+# Python
+nexus/__pycache__/
+nexus/*.pyc
+nexus/.pytest_cache/
+nexus/venv/
+nexus/.venv/
+*.egg-info/
+
+# Docker
+.docker/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Build artifacts
+dist/
+build/
