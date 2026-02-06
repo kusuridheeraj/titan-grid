@@ -1,5 +1,6 @@
 package com.titan.aegis.controller;
 
+import com.titan.aegis.annotation.RateLimit;
 import com.titan.aegis.config.RateLimiterProperties;
 import com.titan.aegis.model.RateLimitDecision;
 import com.titan.aegis.model.RequestToken;
