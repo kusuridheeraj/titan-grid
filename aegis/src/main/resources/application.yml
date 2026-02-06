@@ -1,0 +1,72 @@
+spring:
+  application:
+    name: aegis
+  
+  # Redis Configuration
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD}
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 8
+          min-idle: 2
+          max-wait: 2000ms
+      timeout: 2000ms
+
+# Server Configuration
+server:
+  port: 8080
+  shutdown: graceful
+
+# Rate Limiter Configuration
+aegis:
+  rate-limiter:
+    # Default rate limits (requests per window)
+    default-limit: 100
+    strict-limit: 10
+    
+    # Window duration in seconds
+    window-duration: 60
+    
+    # Redis key prefix
+    key-prefix: "rate_limit"
+    
+    # Failure mode: ALLOW or DENY requests when Redis is down
+    failure-mode: ALLOW
+
+# Actuator Configuration (for Prometheus metrics)
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+      base-path: /actuator
+  
+  endpoint:
+    health:
+      show-details: always
+    
+    prometheus:
+      enabled: true
+  
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+    
+    tags:
+      application: ${spring.application.name}
+      environment: development
+
+# Logging Configuration
+logging:
+  level:
+    root: INFO
+    com.titan.aegis: DEBUG
+    org.springframework.data.redis: DEBUG
+  
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
