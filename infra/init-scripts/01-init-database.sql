@@ -6,16 +6,7 @@ CREATE SCHEMA IF NOT EXISTS aegis;
 CREATE SCHEMA IF NOT EXISTS cryptex;
 CREATE SCHEMA IF NOT EXISTS nexus;
 
--- Aegis: Rate Limiting Tables
-CREATE TABLE IF NOT EXISTS aegis.rate_limit_events (
-    id SERIAL PRIMARY KEY,
-    ip_address VARCHAR(45) NOT NULL,
-    endpoint VARCHAR(255) NOT NULL,
-    timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    blocked BOOLEAN DEFAULT FALSE,
-    INDEX idx_ip_timestamp (ip_address, timestamp),
-    INDEX idx_blocked (blocked)
-);
+-- Note: aegis.rate_limit_events is created by 03-init-aegis-events.sql with full schema
 
 CREATE TABLE IF NOT EXISTS aegis.blacklist (
     id SERIAL PRIMARY KEY,
@@ -37,10 +28,11 @@ CREATE TABLE IF NOT EXISTS cryptex.file_metadata (
     s3_key VARCHAR(500),
     encryption_key_id VARCHAR(255),
     uploaded_by VARCHAR(255),
-    uploaded_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_file_id (file_id),
-    INDEX idx_uploaded_by (uploaded_by)
+    uploaded_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE INDEX IF NOT EXISTS idx_file_id ON cryptex.file_metadata(file_id);
+CREATE INDEX IF NOT EXISTS idx_uploaded_by ON cryptex.file_metadata(uploaded_by);
 
 -- Nexus: AI Agent Logs
 CREATE TABLE IF NOT EXISTS nexus.agent_activity (
@@ -50,10 +42,11 @@ CREATE TABLE IF NOT EXISTS nexus.agent_activity (
     input_data JSONB,
     output_data JSONB,
     success BOOLEAN DEFAULT TRUE,
-    executed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_action_type (action_type),
-    INDEX idx_executed_at (executed_at)
+    executed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE INDEX IF NOT EXISTS idx_action_type ON nexus.agent_activity(action_type);
+CREATE INDEX IF NOT EXISTS idx_executed_at ON nexus.agent_activity(executed_at);
 
 -- Grant permissions
 GRANT ALL PRIVILEGES ON SCHEMA aegis TO titan_admin;
