@@ -1,4 +1,9 @@
 # ⚠️ CRITICAL: Never commit these files!
+
+# Personal documentation (not for repo)
+blog/
+day_wise/
+
 .env
 **/.env
 *.env

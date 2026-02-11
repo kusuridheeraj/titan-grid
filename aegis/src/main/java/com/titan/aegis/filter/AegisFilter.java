@@ -1,12 +1,15 @@
 package com.titan.aegis.filter;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.titan.aegis.metrics.RateLimiterMetrics;
 import com.titan.aegis.model.RateLimitDecision;
 import com.titan.aegis.model.RateLimitRule;
 import com.titan.aegis.model.RequestToken;
 import com.titan.aegis.service.ClientIdExtractor;
+import com.titan.aegis.service.RateLimitEventLogger;
 import com.titan.aegis.service.RateLimitRuleResolver;
 import com.titan.aegis.service.RateLimiterService;
+import com.titan.aegis.service.SuspiciousTrafficPublisher;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -21,16 +24,21 @@ import org.springframework.web.servlet.HandlerExecutionChain;
 import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping;
 
 import java.io.IOException;
-import java.time.Duration;
 import java.util.Map;
 
 /**
  * Servlet filter for automatic rate limiting of all HTTP requests.
  * 
- * This filter intercepts every request and applies rate limiting based on:
+ * This filter intercepts every request and applies rate limiting using the
+ * 3-tier hybrid rule system:
  * 1. @RateLimit annotation (if present on controller method)
  * 2. Database rules (if matching pattern found)
  * 3. YAML configuration (default fallback)
+ * 
+ * Integrates with:
+ * - PostgreSQL event logger (async audit trail)
+ * - Redis Stream publisher (real-time suspicious traffic monitoring)
+ * - Prometheus metrics (performance and analytics)
  * 
  * Runs once per request (OncePerRequestFilter) and applies limits BEFORE
  * the request reaches the controller.
@@ -49,6 +57,11 @@ public class AegisFilter extends OncePerRequestFilter {
     private final RequestMappingHandlerMapping handlerMapping;
     private final ObjectMapper objectMapper;
 
+    // Day 6-7: Observability components
+    private final RateLimitEventLogger eventLogger;
+    private final SuspiciousTrafficPublisher trafficPublisher;
+    private final RateLimiterMetrics metrics;
+
     @Override
     protected void doFilterInternal(
             HttpServletRequest request,
@@ -64,6 +77,9 @@ public class AegisFilter extends OncePerRequestFilter {
             filterChain.doFilter(request, response);
             return;
         }
+
+        // Start decision timer
+        long startTime = System.nanoTime();
 
         try {
             // Get handler method (may be null for non-controller requests)
@@ -88,20 +104,39 @@ public class AegisFilter extends OncePerRequestFilter {
             // Check rate limit
             RateLimitDecision decision = rateLimiterService.isAllowed(token);
 
+            // Calculate decision time
+            double decisionTimeMs = (System.nanoTime() - startTime) / 1_000_000.0;
+
             // Add rate limit headers to response
             addRateLimitHeaders(response, decision);
 
+            // Record metrics
+            metrics.recordRequest(endpoint, rule.clientType().name(), rule.source().name(), decision.allowed());
+            metrics.recordDecisionTime(decisionTimeMs, rule.source().name());
+            metrics.recordRuleEvaluation(rule.source().name());
+
             if (decision.allowed()) {
                 // Request allowed - proceed
-                log.debug("Rate limit OK: {} {} by {} ({}/{} used, source: {})",
-                        method, endpoint, clientId, decision.currentCount(), decision.limit(), rule.source());
+                log.debug("Rate limit OK: {} {} by {} ({}/{} used, source: {}, time: {}ms)",
+                        method, endpoint, clientId, decision.currentCount(), decision.limit(),
+                        rule.source(), String.format("%.2f", decisionTimeMs));
 
                 filterChain.doFilter(request, response);
             } else {
                 // Request blocked - return 429
-                log.warn("Rate limit EXCEEDED: {} {} by {} ({}/{}, reset in {}s, source: {})",
+                log.warn("Rate limit EXCEEDED: {} {} by {} ({}/{}, reset in {}s, source: {}, time: {}ms)",
                         method, endpoint, clientId, decision.currentCount(), decision.limit(),
-                        decision.retryAfter().getSeconds(), rule.source());
+                        decision.retryAfter().getSeconds(), rule.source(), String.format("%.2f", decisionTimeMs));
+
+                // Record blocked metric with severity
+                String severity = eventLogger.calculateSeverity(decision.currentCount(), decision.limit());
+                metrics.recordBlocked(endpoint, rule.clientType().name(), rule.source().name(), severity);
+
+                // Async: Log to PostgreSQL
+                eventLogger.logBlockedRequest(request, clientId, decision, rule, decisionTimeMs);
+
+                // Async: Publish to Redis Stream
+                trafficPublisher.publishBlockedRequest(request, clientId, decision, rule, decisionTimeMs);
 
                 sendRateLimitExceeded(response, decision, clientId, endpoint);
             }
