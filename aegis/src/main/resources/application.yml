@@ -2,12 +2,13 @@ spring:
   application:
     name: aegis
   
-  # Redis Configuration
+  # Redis Configuration (Sentinel High Availability)
   data:
     redis:
-      host: ${REDIS_HOST:localhost}
-      port: ${REDIS_PORT:6379}
-      password: ${REDIS_PASSWORD}
+      sentinel:
+        master: mymaster
+        nodes: ${REDIS_SENTINEL_NODES:localhost:26379,localhost:26380,localhost:26381}
+        password: ${REDIS_PASSWORD}
       lettuce:
         pool:
           max-active: 8
@@ -15,7 +16,7 @@ spring:
           min-idle: 2
           max-wait: 2000ms
       timeout: 2000ms
-  
+
   # PostgreSQL Configuration
   datasource:
     url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:titan_grid}
@@ -38,6 +39,23 @@ spring:
         format_sql: true
         jdbc:
           batch_size: 20
+
+# Resilience4j Circuit Breaker Configuration
+resilience4j:
+  circuitbreaker:
+    configs:
+      default:
+        registerHealthIndicator: true
+        slidingWindowSize: 10
+        minimumNumberOfCalls: 5
+        permittedNumberOfCallsInHalfOpenState: 3
+        automaticTransitionFromOpenToHalfOpenEnabled: true
+        waitDurationInOpenState: 5s
+        failureRateThreshold: 50
+        eventConsumerBufferSize: 10
+    instances:
+      rateLimiter:
+        baseConfig: default
 
 # Server Configuration
 server:
@@ -103,4 +121,3 @@ springdoc:
     operations-sorter: method
     tags-sorter: alpha
     try-it-out-enabled: true
-

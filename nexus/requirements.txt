@@ -1,0 +1,16 @@
+fastapi
+uvicorn
+httpx
+redis
+psycopg[binary]
+langchain
+langchain-community
+langchain-ollama
+langchain-openai
+langchain-anthropic
+mcp[fastapi,server]
+pydantic
+pydantic-settings
+python-dotenv
+fastmcp
+prometheus-fastapi-instrumentator

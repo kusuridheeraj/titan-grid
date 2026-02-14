@@ -2,7 +2,7 @@
 -- Stores runtime-configurable rate limit rules (Priority 2 in hybrid system)
 
 CREATE TABLE IF NOT EXISTS aegis.rate_limit_rules (
-    id SERIAL PRIMARY KEY,
+    id BIGSERIAL PRIMARY KEY,
     
     -- Endpoint pattern (supports wildcards: /api/test/**, /api/admin/*)
     endpoint_pattern VARCHAR(255) NOT NULL,

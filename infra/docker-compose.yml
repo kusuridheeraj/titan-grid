@@ -1,25 +1,94 @@
 version: '3.8'
 
 services:
-  # Redis - For rate limiting and caching
-  redis:
-    image: redis:7-alpine
-    container_name: titan-redis
+  # ==========================================
+  # DATA LAYER (High Availability)
+  # ==========================================
+
+  # Redis Master (Primary Write Node)
+  redis-master:
+    image: redis:7.2-alpine
+    container_name: titan-redis-master
+    command: redis-server --requirepass ${REDIS_PASSWORD} --masterauth ${REDIS_PASSWORD}
     ports:
       - "6379:6379"
-    command: redis-server --requirepass ${REDIS_PASSWORD}
     volumes:
-      - redis-data:/data
+      - redis-master-data:/data
     networks:
       - titan-network
     healthcheck:
-      test: [ "CMD", "redis-cli", "--raw", "incr", "ping" ]
-      interval: 10s
+      test: [ "CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping" ]
+      interval: 5s
       timeout: 3s
       retries: 5
-    restart: unless-stopped
 
-  # PostgreSQL - For persistent storage
+  # Redis Replicas (Read Scalability & Failover)
+  redis-replica-1:
+    image: redis:7.2-alpine
+    container_name: titan-redis-replica-1
+    command: redis-server --replicaof redis-master 6379 --requirepass ${REDIS_PASSWORD} --masterauth ${REDIS_PASSWORD}
+    depends_on:
+      - redis-master
+    networks:
+      - titan-network
+
+  redis-replica-2:
+    image: redis:7.2-alpine
+    container_name: titan-redis-replica-2
+    command: redis-server --replicaof redis-master 6379 --requirepass ${REDIS_PASSWORD} --masterauth ${REDIS_PASSWORD}
+    depends_on:
+      - redis-master
+    networks:
+      - titan-network
+
+  # Redis Sentinel (Automatic Failover Orchestration)
+  redis-sentinel-1:
+    image: bitnami/redis-sentinel:latest
+    container_name: titan-sentinel-1
+    environment:
+      - REDIS_MASTER_HOST=redis-master
+      - REDIS_MASTER_PORT_NUMBER=6379
+      - REDIS_MASTER_SET=mymaster
+      - REDIS_SENTINEL_QUORUM=2
+      - REDIS_MASTER_PASSWORD=${REDIS_PASSWORD}
+    depends_on:
+      - redis-master
+      - redis-replica-1
+      - redis-replica-2
+    ports:
+      - "26379:26379"
+    networks:
+      - titan-network
+
+  redis-sentinel-2:
+    image: bitnami/redis-sentinel:latest
+    container_name: titan-sentinel-2
+    environment:
+      - REDIS_MASTER_HOST=redis-master
+      - REDIS_MASTER_PORT_NUMBER=6379
+      - REDIS_MASTER_SET=mymaster
+      - REDIS_SENTINEL_QUORUM=2
+      - REDIS_MASTER_PASSWORD=${REDIS_PASSWORD}
+    depends_on:
+      - redis-master
+    networks:
+      - titan-network
+
+  redis-sentinel-3:
+    image: bitnami/redis-sentinel:latest
+    container_name: titan-sentinel-3
+    environment:
+      - REDIS_MASTER_HOST=redis-master
+      - REDIS_MASTER_PORT_NUMBER=6379
+      - REDIS_MASTER_SET=mymaster
+      - REDIS_SENTINEL_QUORUM=2
+      - REDIS_MASTER_PASSWORD=${REDIS_PASSWORD}
+    depends_on:
+      - redis-master
+    networks:
+      - titan-network
+
+  # PostgreSQL - Persistent Relational Data
   postgres:
     image: postgres:15-alpine
     container_name: titan-postgres
@@ -41,7 +110,28 @@ services:
       retries: 5
     restart: unless-stopped
 
-  # HashiCorp Vault - For secrets management
+  # MinIO - S3 Compatible Object Storage (Local Development)
+  minio:
+    image: minio/minio:latest
+    container_name: titan-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio-data:/data
+    networks:
+      - titan-network
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:9000/minio/health/live" ]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  # HashiCorp Vault - Secrets Management
   vault:
     image: hashicorp/vault:latest
     container_name: titan-vault
@@ -49,6 +139,7 @@ services:
       - "8200:8200"
     environment:
       VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_TOKEN}
+      VAULT_ADDR: http://127.0.0.1:8200
       VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
     cap_add:
       - IPC_LOCK
@@ -61,7 +152,27 @@ services:
       retries: 5
     restart: unless-stopped
 
-  # Prometheus - Metrics collection (for observability)
+  # Vault Init - Automates the enabling of Transit Secrets Engine
+  vault-init:
+    image: hashicorp/vault:latest
+    container_name: titan-vault-init
+    depends_on:
+      vault:
+        condition: service_healthy
+    volumes:
+      - ./vault-scripts/init-vault.sh:/init-vault.sh
+    environment:
+      VAULT_ADDR: http://titan-vault:8200
+      VAULT_TOKEN: ${VAULT_TOKEN}
+    entrypoint: /bin/sh /init-vault.sh
+    networks:
+      - titan-network
+
+  # ==========================================
+  # OBSERVABILITY
+  # ==========================================
+
+  # Prometheus - Metrics collection
   prometheus:
     image: prom/prometheus:latest
     container_name: titan-prometheus
@@ -96,6 +207,10 @@ services:
       - prometheus
     restart: unless-stopped
 
+  # ==========================================
+  # APPLICATIONS
+  # ==========================================
+
   # Aegis - Distributed Rate Limiter Application
   aegis:
     build:
@@ -105,9 +220,11 @@ services:
     ports:
       - "8080:8080"
     environment:
-      REDIS_HOST: titan-redis
-      REDIS_PORT: 6379
+      # Redis Sentinel Config
+      SPRING_DATA_REDIS_SENTINEL_MASTER: mymaster
+      SPRING_DATA_REDIS_SENTINEL_NODES: titan-sentinel-1:26379,titan-sentinel-2:26379,titan-sentinel-3:26379
       REDIS_PASSWORD: ${REDIS_PASSWORD}
+      # Database Config
       POSTGRES_HOST: titan-postgres
       POSTGRES_PORT: 5432
       POSTGRES_DB: ${POSTGRES_DB}
@@ -116,8 +233,8 @@ services:
     networks:
       - titan-network
     depends_on:
-      redis:
-        condition: service_healthy
+      redis-sentinel-1:
+        condition: service_started
       postgres:
         condition: service_healthy
     healthcheck:
@@ -128,14 +245,93 @@ services:
       retries: 3
     restart: unless-stopped
 
+  # Cryptex - Secure Storage Service
+  cryptex:
+    build:
+      context: ../cryptex
+      dockerfile: Dockerfile
+    container_name: titan-cryptex
+    ports:
+      - "8081:8081"
+    environment:
+      # Vault Config
+      VAULT_HOST: titan-vault
+      VAULT_PORT: 8200
+      VAULT_TOKEN: ${VAULT_TOKEN}
+      # MinIO Config
+      MINIO_ENDPOINT: http://titan-minio:9000
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    networks:
+      - titan-network
+    depends_on:
+      vault:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8081/actuator/health" ]
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+    restart: unless-stopped
+
+  # Nexus - AI Operator
+  nexus:
+    build:
+      context: ../nexus
+      dockerfile: Dockerfile
+    container_name: titan-nexus
+    ports:
+      - "8082:8082"
+    environment:
+      AEGIS_URL: http://titan-aegis:8080
+      CRYPTEX_URL: http://titan-cryptex:8081
+      REDIS_HOST: titan-redis-master
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      POSTGRES_HOST: titan-postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      LLM_PROVIDER: ollama
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+    networks:
+      - titan-network
+    depends_on:
+      - redis-master
+      - postgres
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  # Console - Frontend UI
+  console:
+    build:
+      context: ../titan-console
+      dockerfile: Dockerfile
+    container_name: titan-console
+    ports:
+      - "80:80"
+    networks:
+      - titan-network
+    depends_on:
+      - aegis
+      - cryptex
+      - nexus
+    restart: unless-stopped
+
 networks:
   titan-network:
     driver: bridge
 
 volumes:
-  redis-data:
+  redis-master-data:
   postgres-data:
   prometheus-data:
   grafana-data:
+  minio-data:
 
 

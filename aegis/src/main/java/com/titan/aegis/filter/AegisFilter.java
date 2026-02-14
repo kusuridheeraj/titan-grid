@@ -16,6 +16,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -48,7 +49,6 @@ import java.util.Map;
 @Slf4j
 @Component
 @Order(1) // Run early in filter chain
-@RequiredArgsConstructor
 public class AegisFilter extends OncePerRequestFilter {
 
     private final RateLimiterService rateLimiterService;
@@ -61,6 +61,25 @@ public class AegisFilter extends OncePerRequestFilter {
     private final RateLimitEventLogger eventLogger;
     private final SuspiciousTrafficPublisher trafficPublisher;
     private final RateLimiterMetrics metrics;
+
+    public AegisFilter(
+            RateLimiterService rateLimiterService,
+            RateLimitRuleResolver ruleResolver,
+            ClientIdExtractor clientIdExtractor,
+            @Qualifier("requestMappingHandlerMapping") RequestMappingHandlerMapping handlerMapping,
+            ObjectMapper objectMapper,
+            RateLimitEventLogger eventLogger,
+            SuspiciousTrafficPublisher trafficPublisher,
+            RateLimiterMetrics metrics) {
+        this.rateLimiterService = rateLimiterService;
+        this.ruleResolver = ruleResolver;
+        this.clientIdExtractor = clientIdExtractor;
+        this.handlerMapping = handlerMapping;
+        this.objectMapper = objectMapper;
+        this.eventLogger = eventLogger;
+        this.trafficPublisher = trafficPublisher;
+        this.metrics = metrics;
+    }
 
     @Override
     protected void doFilterInternal(
