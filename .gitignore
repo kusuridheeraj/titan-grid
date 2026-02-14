@@ -3,6 +3,7 @@
 # Personal documentation (not for repo)
 blog/
 day_wise/
+/docs/day_wise/
 
 .env
 **/.env
