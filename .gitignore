@@ -50,3 +50,5 @@ logs/
 # Build artifacts
 dist/
 build/
+
+.geminiignore
